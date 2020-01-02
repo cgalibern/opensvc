@@ -28,3 +28,4 @@ bin/init/opensvc.init
 .coverage
 *.example
 *.exe
+.idea
