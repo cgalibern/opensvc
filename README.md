@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/cgalibern/opensvc.svg?branch=master)](https://travis-ci.org/cgalibern/opensvc)
+
 A cluster orchestrator with a distinctive feature set
 =====================================================
 
