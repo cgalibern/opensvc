@@ -1,3 +1,5 @@
+# -*- encoding: utf-8 -*-
+import io
 import json
 import os
 import sys
@@ -250,6 +252,7 @@ class TestCreateAddDecode:
         with open(tmp_file) as output_file:
             assert output_file.read() == ''
 
+
 @pytest.mark.ci
 @pytest.mark.usefixtures('has_service_with_cfg', 'has_privs')
 class TestCreateAddDecodeFrom:
@@ -360,31 +363,39 @@ class TestCfgSecEdit:
             assert output_file.read() == 'abcd text added'
 
     @staticmethod
+    @pytest.mark.parametrize(
+        "value",
+        ["abcd", u"ù è é € £ ù a", "ù è é € £ ù a", "ボールト", u"ボールト"])
     @pytest.mark.parametrize('obj', ['demo/cfg/name', 'demo/sec/name'])
-    def test_can_edit_editable_objects_created_from_file(mocker, capture_stdout, tmp_file, obj):
+    def test_can_edit_editable_objects_created_from_file(
+            mocker,
+            capture_stdout,
+            tmp_file,
+            obj,
+            value):
         """
         objects created from file are bytes
         """
         def file_editor_side_effect(_, fpath):
-            with open(fpath, 'a+') as f:
+            with io.open(fpath, 'a+', encoding="utf8") as f:
                 f.write(' text added')
         mocker.patch('core.objects.data.edit_file', side_effect=file_editor_side_effect)
-        with open(tmp_file, 'w+') as f:
-            f.write('abcd')
+        with io.open(tmp_file, 'w+', encoding="utf8") as f:
+            f.write(value)
         assert Mgr(selector=obj)(['create']) == 0
         assert Mgr(selector=obj)(['add', '--key', 'key1', '--from', tmp_file]) == 0
         with capture_stdout(tmp_file):
             assert Mgr(selector=obj)(['decode', '--key', 'key1']) == 0
 
         with open(tmp_file) as output_file:
-            assert output_file.read() == 'abcd'
+            assert output_file.read() == value
 
         assert Mgr(selector=obj)(['edit', '--key', 'key1']) == 0
         with capture_stdout(tmp_file):
             assert Mgr(selector=obj)(['decode', '--key', 'key1']) == 0
 
         with open(tmp_file) as output_file:
-            assert output_file.read() == 'abcd text added'
+            assert output_file.read() == value + ' text added'
 
     @staticmethod
     def test_can_not_edit_non_string_secrets(capture_stdout, tmp_file):
