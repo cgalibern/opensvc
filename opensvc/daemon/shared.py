@@ -20,6 +20,7 @@ from foreign.six.moves import queue
 import core.exceptions as ex
 from foreign.jsonpath_ng.ext import parse
 from env import Env
+from utilities.concurrent_futures import get_concurrent_futures
 from utilities.journaled_data import JournaledData
 from utilities.lazy import lazy, unset_lazy
 from utilities.naming import split_path, paths_data, factory, object_path_glob
@@ -67,6 +68,8 @@ class OsvcJournaledData(JournaledData):
             # disable journaling if we have no peer, as nothing purges the journal
             journal_condition=lambda: bool(LOCAL_GEN),
         )
+
+concurrent_futures = get_concurrent_futures()
 
 
 # import utilities.dbglock
@@ -407,7 +410,13 @@ class OsvcThread(threading.Thread, Crypt):
             ProcessLookupError = OSError
         for data in self.procs:
             # noinspection PyUnboundLocalVariable
-            if hasattr(data.proc, "poll"):
+            if hasattr(data.proc, "done"):
+                # subprocess.Popen()
+                ret = lambda: data.proc.done()
+                poll = None
+                comm = None
+                kill = lambda: data.proc.cancel()
+            elif hasattr(data.proc, "poll"):
                 # subprocess.Popen()
                 ret = lambda: data.proc.returncode
                 poll = lambda: data.proc.poll()
@@ -424,7 +433,10 @@ class OsvcThread(threading.Thread, Crypt):
             except ProcessLookupError:  # pylint: disable=undefined-variable
                 continue
             for _ in range(self.stop_tmo):
-                if ret() is not None:
+                ret = ret()
+                if ret is True:
+                    break
+                elif ret is not None and ret is not False:
                     comm()
                     poll()
                     break
@@ -433,17 +445,28 @@ class OsvcThread(threading.Thread, Crypt):
     def janitor_procs(self):
         done = []
         for idx, data in enumerate(self.procs):
-            try:
-                # subprocess.Popen()
-                data.proc.poll()
-                ret = data.proc.returncode
-                comm = lambda: data.proc.communicate()
-            except AttributeError:
-                # multiprocessing.Process()
-                ret = data.proc.exitcode
-                comm = lambda: None
+            if hasattr(data.proc, 'done'):
+                if data.proc.done():
+                    try:
+                        ret = data.proc.result()
+                    except (concurrent_futures.CancelledError,
+                            concurrent_futures.process.BrokenProcessPool):
+                        ret = 1
+                else:
+                    ret = None
+            else:
+                try:
+                    # subprocess.Popen()
+                    data.proc.poll()
+                    ret = data.proc.returncode
+                    comm = lambda: data.proc.communicate()
+                except AttributeError:
+                    # multiprocessing.Process()
+                    ret = data.proc.exitcode
+                    comm = lambda: None
+                if ret is not None:
+                    comm()
             if ret is not None:
-                comm()
                 done.append(idx)
                 if ret == 0 and data.on_success:
                     getattr(self, data.on_success)(*data.on_success_args,

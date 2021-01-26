@@ -17,6 +17,8 @@ import daemon.shared as shared
 from core.freezer import Freezer
 from env import Env
 from foreign.six.moves import queue
+
+from utilities.concurrent_futures import get_concurrent_futures
 from utilities.naming import (factory, fmt_path, list_services,
                               resolve_path, split_path, svc_pathcf,
                               svc_pathvar)
@@ -89,6 +91,23 @@ ETC_NS_SKIP = len(os.path.join(Env.paths.pathetcns, ""))
 #    pr.disable()
 #    ps = pstats.Stats(pr).sort_stats(2)
 #    ps.print_stats()
+
+from commands.svc import Mgr
+
+
+def svc_cmd(args):
+    try:
+        pid = os.fork()
+        if pid > 0:
+            _, status = os.waitpid(pid, 0)
+            return status
+    except Exception:
+        return
+    os.environ["OSVC_ACTION_ORIGIN"] = "daemon"
+    os.environ["OSVC_KIND"] = "svc"
+    ret = Mgr()(argv=args)
+    os._exit(ret)
+
 
 class Defer(Exception):
     """
@@ -624,6 +643,7 @@ class Monitor(shared.OsvcThread, MonitorObjectOrchestratorManualMixin):
         self.compat = True
         self.last_node_data = None
         self.init_steps = set()
+        self.executor = None
 
     def init(self):
         self.set_tid()
@@ -635,7 +655,7 @@ class Monitor(shared.OsvcThread, MonitorObjectOrchestratorManualMixin):
         self.unfreeze_when_all_nodes_joined = False
         self.node_frozen = self.freezer.node_frozen()
         self.init_data()
-
+        self.create_executor()
         if os.environ.get("OPENSVC_AGENT_UPGRADE"):
             if not self.node_frozen:
                 self.event("node_freeze", data={"reason": "upgrade"})
@@ -664,6 +684,13 @@ class Monitor(shared.OsvcThread, MonitorObjectOrchestratorManualMixin):
         # send a first message without service status, so the peers know
         # we are in init state.
         self.update_hb_data()
+
+    def create_executor(self):
+        concurrent_futures = get_concurrent_futures()
+        max_workers = shared.NODE.max_parallel
+        if max_workers > 61:
+            max_workers = 61
+        self.executor = concurrent_futures.ProcessPoolExecutor(max_workers=max_workers)
 
     def wait_listener(self):
         while True:
@@ -1237,7 +1264,7 @@ class Monitor(shared.OsvcThread, MonitorObjectOrchestratorManualMixin):
             "--kw", "flex_max=%d" % instances,
             "--kw", "flex_target=%d" % instances,
         ]
-        proc = self.service_command(path, cmd)
+        proc = super(Monitor, self).service_command(path, cmd)
         out, err = proc.communicate()
         return proc.returncode
 
@@ -3281,6 +3308,17 @@ class Monitor(shared.OsvcThread, MonitorObjectOrchestratorManualMixin):
         self.node_data.set(["services", "config"], config)
         return config
 
+    def service_command(self, paths, cmd, local=True):
+        """service command for ProcessPoolExecutor"""
+        if paths:
+            args = ["-s", paths] + cmd
+        else:
+            args = cmd
+        if local and "--local" not in cmd:
+            args += ["--local"]
+        self.log.info("execute: om svc %s", " ".join(args))
+        return self.executor.submit(svc_cmd, args)
+
     def get_last_svc_status_mtime(self, path):
         """
         Return the mtime of the specified service configuration file on the
@@ -3302,7 +3340,7 @@ class Monitor(shared.OsvcThread, MonitorObjectOrchestratorManualMixin):
         """
         self.log.info("synchronous service status eval: %s", path)
         cmd = ["status", "--refresh"]
-        proc = self.service_command(path, cmd, local=False)
+        proc = super(Monitor, self).service_command(path, cmd, local=False)
         self.push_proc(proc=proc)
         proc.communicate()
         fpath = svc_pathvar(path, "status.json")
