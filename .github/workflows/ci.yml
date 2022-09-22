@@ -17,8 +17,8 @@ jobs:
         include:
           - python-version: 2.7
             PYTEST_EXTRA_ARGS: ""
-          - python-version: 3.7
-            PYTEST_EXTRA_ARGS: "--cov"
+#          - python-version: 3.7
+#            PYTEST_EXTRA_ARGS: "--cov"
         
     steps:
       - name: Checkout opensvc
@@ -39,16 +39,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r test-requirements.txt
 
-      - name: Run pytest
-        env:
-          OPENSVC_CI_EXTRA_TIME_OSVCD_STARTUP: 25
-        run: sudo $(which pytest) ${{ matrix.PYTEST_EXTRA_ARGS }} -m "ci"
+#      - name: Run pytest
+#        env:
+#          OPENSVC_CI_EXTRA_TIME_OSVCD_STARTUP: 25
+#        run: sudo $(which pytest) ${{ matrix.PYTEST_EXTRA_ARGS }} -m "ci"
 
-      - name: Run codecov
-        if: ${{ success() }}
-        run: |
-          pip install codecov
-          codecov
+#      - name: Run codecov
+#        if: ${{ success() }}
+#        run: |
+#          pip install codecov
+#          codecov
 
   ci-pylint:
     runs-on: ubuntu-latest
